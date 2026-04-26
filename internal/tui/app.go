@@ -190,6 +190,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filtered = msg.games
 			m.searchTime = msg.duration
 			m.list.SetItems(views.ToItems(m.filtered))
+			m.list.ResetSelected()
+
 		}
 		return m, nil
 
@@ -304,6 +306,8 @@ func (m *Model) performSearch() {
 	m.filtered = res
 	m.searchTime = dur
 	m.list.SetItems(views.ToItems(m.filtered))
+	m.list.ResetSelected()
+
 }
 
 func formatLatency(d time.Duration) string {
