@@ -13,13 +13,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// --- UI Theme Palette ---
 var (
 	accent    = lipgloss.Color("#7D56F4")
 	highlight = lipgloss.Color("#df93df")
 	bg        = lipgloss.Color("#f5e5f1")
 	subtle    = lipgloss.Color("#89566a")
-	text      = lipgloss.Color("#C0CAF5") // Soft White
+	text      = lipgloss.Color("#C0CAF5")
 
 	windowStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -34,41 +33,34 @@ var (
 			Bold(true)
 )
 
-// --- GameItem Implementation ---
-
 type GameItem struct {
 	Game discord.Game
+	Desc string
 }
 
 func (g GameItem) Title() string       { return g.Game.Name }
-func (g GameItem) FilterValue() string { return fmt.Sprintf("%s %v", g.Game.Name, g.Game.Aliases) }
+func (g GameItem) FilterValue() string { return g.Game.Name }
+func (g GameItem) Description() string { return g.Desc }
 
-func (g GameItem) Description() string {
-	for _, exe := range g.Game.Executables {
+// NewGameItem caches the display label for the executable to save CPU cycles during render
+func NewGameItem(g discord.Game) GameItem {
+	desc := "No win32 executable"
+	for _, exe := range g.Executables {
 		if exe.OS == discord.OSWindows && !exe.IsLauncher {
-			if name := normalizeExeLabel(exe); name != "" {
-				return name
+			name := strings.TrimSpace(exe.Filename)
+			if name == "" {
+				name = strings.TrimSpace(exe.Name)
 			}
+			desc = path.Base(strings.ReplaceAll(name, "\\", "/"))
+			break
 		}
 	}
-	return "No win32 executable"
+	return GameItem{Game: g, Desc: desc}
 }
-
-func normalizeExeLabel(exe discord.GameExecutable) string {
-	name := strings.TrimSpace(exe.Filename)
-	if name == "" {
-		name = strings.TrimSpace(exe.Name)
-	}
-	name = strings.ReplaceAll(name, "\\", "/")
-	return path.Base(name)
-}
-
-// --- Component Constructors ---
 
 func NewSearchInput() textinput.Model {
 	input := textinput.New()
 	input.Placeholder = "Find a game..."
-
 	input.Focus()
 	input.CharLimit = 64
 	input.TextStyle = lipgloss.NewStyle().Foreground(text)
@@ -80,26 +72,23 @@ func NewGameList(items []list.Item) list.Model {
 	l := list.New(items, itemDelegate{}, 0, 0)
 	l.Title = "DISCORD QUESTS"
 	l.Styles.Title = headerStyle
-
 	l.SetShowPagination(true)
 	l.SetShowStatusBar(false)
-
 	l.SetShowHelp(false)
 	l.SetFilteringEnabled(false)
-
+	l.KeyMap.Quit.SetKeys()
+	l.KeyMap.ForceQuit.SetKeys()
 	return l
 }
 
-// ToItems converts the discord.Game slice into list.Item interface compatible types.
 func ToItems(games []discord.Game) []list.Item {
-	items := make([]list.Item, 0, len(games))
-	for _, g := range games {
-		items = append(items, GameItem{Game: g})
+	items := make([]list.Item, len(games))
+	for i, g := range games {
+		items[i] = NewGameItem(g)
 	}
 	return items
 }
 
-// SelectedGame extracts the underlying discord.Game from the list's current selection.
 func SelectedGame(l list.Model) (discord.Game, bool) {
 	item, ok := l.SelectedItem().(GameItem)
 	if !ok {
@@ -120,44 +109,35 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		return
 	}
 
-	// Calculate width for justification
 	availWidth := m.Width() - 2
-
 	title := i.Title()
 	exe := i.Description()
 
-	// 1. Force transparent background for all base styles
 	baseStyle := lipgloss.NewStyle().Background(lipgloss.Color(""))
-
 	titleStyle := baseStyle.Copy().PaddingLeft(1)
 	exeStyle := baseStyle.Copy().Foreground(subtle).Italic(true)
 
-	// 2. Selection Styling
 	if index == m.Index() {
 		titleStyle = titleStyle.
 			Foreground(highlight).
 			Bold(true).
 			Border(lipgloss.NormalBorder(), false, false, false, true).
 			BorderForeground(highlight).
-			PaddingLeft(0) // Align for border
+			PaddingLeft(0)
 
 		exeStyle = exeStyle.Foreground(accent).Bold(false)
 	} else {
 		titleStyle = titleStyle.Foreground(text)
 	}
 
-	// 3. Render strings
 	renderedTitle := titleStyle.Render(title)
 	renderedExe := exeStyle.Render(exe)
 
-	// 4. Manual Justification with standard spaces
-	// Using strings.Repeat ensures no hidden style-shading is applied to the gap
 	paddingCount := availWidth - lipgloss.Width(renderedTitle) - lipgloss.Width(renderedExe)
 	if paddingCount < 0 {
 		paddingCount = 0
 	}
 	gap := strings.Repeat(" ", paddingCount)
 
-	// Assembly
 	fmt.Fprintf(w, "%s%s%s", renderedTitle, gap, renderedExe)
 }

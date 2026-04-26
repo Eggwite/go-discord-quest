@@ -4,6 +4,7 @@ package main
 
 import (
 	"os"
+	"runtime"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -85,6 +86,8 @@ type paintStruct struct {
 }
 
 func main() {
+	runtime.LockOSThread()
+
 	title := "System Stub"
 	if len(os.Args) > 2 && os.Args[1] == "--title" {
 		title = os.Args[2]

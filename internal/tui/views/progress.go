@@ -47,7 +47,7 @@ func RenderProgressCard(gameName, exePath string, elapsed, total time.Duration, 
 		"",
 		bar.ViewAs(percent),
 		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Italic(true).Render("Press 'q' to stop spoofing"),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Italic(true).Render("Press 'q' or 'esc' to stop spoofing"),
 	)
 
 	return lipgloss.NewStyle().

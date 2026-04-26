@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"path"
 	"strings"
 	"time"
 
@@ -38,7 +37,6 @@ const (
 	LogInfo    LogType = "info"
 	LogError   LogType = "error"
 	LogWarning LogType = "warning"
-	LogDebug   LogType = "debug"
 )
 
 type LogEntry struct {
@@ -52,12 +50,16 @@ type gamesLoadedMsg struct {
 	trace []string
 	err   error
 }
-type processExitedMsg struct {
-	err error
-}
+
 type runnerStartedMsg struct {
 	runner *runner.Runner
 	err    error
+}
+
+type searchResultMsg struct {
+	games    []discord.Game
+	duration time.Duration
+	id       int
 }
 
 type tickMsg time.Time
@@ -75,9 +77,11 @@ type Model struct {
 
 	showLogs bool
 
-	allGames []discord.Game
-	filtered []discord.Game
-	selected discord.Game
+	allGames   []search.SearchableGame
+	filtered   []discord.Game
+	selected   discord.Game
+	searchTime time.Duration
+	searchId   int
 
 	runner  *runner.Runner
 	started time.Time
@@ -121,6 +125,13 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, loadGamesCmd())
 }
 
+func (m *Model) KillRunner() {
+	if m.runner != nil {
+		_ = m.runner.Stop()
+		m.runner = nil
+	}
+}
+
 func loadGamesCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -146,8 +157,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.list.SetSize(msg.Width-8, m.height-18)
-		m.help.Width = msg.Width
 		listHeight := max(8, msg.Height-8)
 		if m.showLogs {
 			listHeight = max(8, msg.Height-18)
@@ -155,6 +164,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.vp.Height = 8
 		}
 		m.list.SetSize(max(30, msg.Width-4), listHeight)
+		m.help.Width = msg.Width
 
 	case spinner.TickMsg:
 		if m.state == StateLoading {
@@ -166,19 +176,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case gamesLoadedMsg:
 		if msg.err != nil {
 			m.appendLog(LogError, fmt.Sprintf("failed to load games: %v", msg.err))
-			m.allGames = []discord.Game{}
-			m.filtered = []discord.Game{}
-			m.list.SetItems(nil)
 		} else {
 			m.appendLog(LogInfo, fmt.Sprintf("loaded %d games", len(msg.games)))
-			m.allGames = msg.games
-			m.filtered = search.Search(m.allGames, "")
-			m.list.SetItems(views.ToItems(m.filtered))
-		}
-		if len(msg.trace) > 0 {
-			m.loadingTrace = msg.trace
+			m.allGames = search.PrepareSearchData(msg.games)
+			m.performSearch()
 		}
 		m.state = StateSearch
+		return m, nil
+
+	case searchResultMsg:
+		// Prevents race conditions by checking current search ID
+		if msg.id == m.searchId {
+			m.filtered = msg.games
+			m.searchTime = msg.duration
+			m.list.SetItems(views.ToItems(m.filtered))
+		}
 		return m, nil
 
 	case runnerStartedMsg:
@@ -197,15 +209,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state != StateRunning || m.runner == nil {
 			return m, nil
 		}
-
-		// Check if process is still running
 		if !m.runner.IsRunning() {
 			m.appendLog(LogInfo, "Game window was closed manually")
 			m.state = StateSearch
 			m.runner = nil
 			return m, nil
 		}
-
 		m.elapsed = time.Since(m.started)
 		if m.elapsed >= QuestDuration {
 			_ = m.runner.Stop()
@@ -222,79 +231,96 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+l":
 			m.showLogs = !m.showLogs
-			// If we are opening logs, ensure the viewport is scrolled to the bottom
 			if m.showLogs {
 				m.vp.GotoBottom()
 			}
-			// Force a resize/repaint sync
 			return m, func() tea.Msg {
 				return tea.WindowSizeMsg{Width: m.width, Height: m.height}
 			}
-
-		case "ctrl+c", "q": // Standard exit
+		case "ctrl+c":
 			return m, tea.Quit
 		}
 
-		// IMPORTANT: Pass the key event to the viewport when logs are visible
-		// But don't swallow the event - let the viewport handle it if logs are showing
 		if m.showLogs {
-			// Also pass the key to the viewport to handle scrolling
 			var vpCmd tea.Cmd
 			m.vp, vpCmd = m.vp.Update(msg)
-			// Only return the viewport command if we're not also handling other commands
-			if len(cmds) == 0 {
-				return m, vpCmd
-			}
 			cmds = append(cmds, vpCmd)
 		}
 
 		switch m.state {
 		case StateSearch:
 			switch msg.String() {
-			case "esc", "ctrl+c":
-				return m, tea.Quit
 			case "enter":
 				game, ok := views.SelectedGame(m.list)
-				if !ok {
-					return m, nil
+				if ok {
+					m.selected = game
+					m.state = StateRunning
+					m.elapsed = 0
+					return m, startRunnerCmd(game)
 				}
-				m.selected = game
-				m.state = StateRunning
-				m.elapsed = 0
-				return m, startRunnerCmd(game)
 			}
 
+			oldVal := m.input.Value()
 			var inputCmd tea.Cmd
 			m.input, inputCmd = m.input.Update(msg)
 			cmds = append(cmds, inputCmd)
 
-			m.filtered = search.Search(m.allGames, m.input.Value())
-			m.list.SetItems(views.ToItems(m.filtered))
+			// Debounce of 40ms to utilise resources efficiently during rapid typing
+			if m.input.Value() != oldVal {
+				m.searchId++
+				id := m.searchId
+				query := m.input.Value()
+				cmds = append(cmds, func() tea.Msg {
+					time.Sleep(40 * time.Millisecond)
+					if id != m.searchId {
+						return nil
+					}
+					games, dur := search.Search(m.allGames, query)
+					return searchResultMsg{games: games, duration: dur, id: id}
+				})
+			}
 
 			var listCmd tea.Cmd
 			m.list, listCmd = m.list.Update(msg)
 			cmds = append(cmds, listCmd)
 
-			return m, tea.Batch(cmds...)
-
-		case StateRunning:
+		case StateRunning, StateDone:
 			if msg.String() == "q" || msg.String() == "esc" {
 				if m.runner != nil {
 					_ = m.runner.Stop()
 					m.runner = nil
 				}
 				m.state = StateSearch
-				m.appendLog(LogWarning, "runner stopped by user")
 			}
-
-		case StateDone:
-			m.state = StateSearch
-			m.elapsed = 0
 		}
 		return m, tea.Batch(cmds...)
 	}
-
 	return m, nil
+}
+
+func (m *Model) performSearch() {
+	m.searchId++
+	res, dur := search.Search(m.allGames, m.input.Value())
+	m.filtered = res
+	m.searchTime = dur
+	m.list.SetItems(views.ToItems(m.filtered))
+}
+
+func formatLatency(d time.Duration) string {
+	if d == 0 {
+		return "<1ns"
+	}
+	switch {
+	case d >= time.Second:
+		return fmt.Sprintf("%.2fs", d.Seconds())
+	case d >= time.Millisecond:
+		return fmt.Sprintf("%.2fms", float64(d.Microseconds())/1000)
+	case d >= time.Microsecond:
+		return fmt.Sprintf("%.2fµs", float64(d.Nanoseconds())/1000)
+
+	default:
+		return fmt.Sprintf("%dns", d.Nanoseconds())
+	}
 }
 
 func (m *Model) View() string {
@@ -311,22 +337,22 @@ func (m *Model) View() string {
 		body = m.spinner.View() + " Initialising..."
 
 	case StateSearch:
+		// Triggers breakdown of search latency in seconds, milliseconds, microseconds, and nanoseconds
+		latency := formatLatency(m.searchTime)
+
 		stats := lipgloss.JoinHorizontal(lipgloss.Left,
 			StatChip("LOADED", fmt.Sprintf("%d", len(m.allGames))),
 			" ",
 			StatChip("MATCHED", fmt.Sprintf("%d", len(m.filtered))),
+			" ",
+			StatChip("LATENCY", latency),
 		)
 		input := InputCardStyle.Width(docWidth - 2).Render(m.input.View())
 
 		var content string
 		if m.showLogs {
-			// When showing logs, display the log viewport
-			// Adjust list height to make room for logs
-			m.list.SetSize(docWidth-4, m.height-26) // Reduced height to make room for logs
-			logsView := lipgloss.NewStyle().
-				Width(docWidth).
-				MarginTop(1).
-				Render(m.vp.View())
+			m.list.SetSize(docWidth-4, m.height-26)
+			logsView := lipgloss.NewStyle().Width(docWidth).MarginTop(1).Render(m.vp.View())
 			listView := CardStyle.Width(docWidth - 4).Render(m.list.View())
 			content = lipgloss.JoinVertical(lipgloss.Left, input, listView, logsView)
 		} else {
@@ -338,7 +364,6 @@ func (m *Model) View() string {
 		body = lipgloss.JoinVertical(lipgloss.Left, stats, content)
 
 	case StateRunning:
-		// FIX: Nil guard to prevent panic before runner starts
 		exePath := "Launching..."
 		if m.runner != nil {
 			exePath = m.runner.ExePath
@@ -346,18 +371,12 @@ func (m *Model) View() string {
 		body = views.RenderProgressCard(m.selected.Name, exePath, m.elapsed, QuestDuration, m.bar)
 
 	case StateDone:
-		body = lipgloss.NewStyle().Foreground(Success).Bold(true).Render("Quest completed! Press any key to return.")
+		body = lipgloss.NewStyle().Foreground(Success).Bold(true).Render("Quest completed! Press Q to return.")
 	}
 
-	helpView := m.help.View(m.keys)
-	footer := StatusBarStyle.Width(m.width).Render(helpView)
+	footer := StatusBarStyle.Width(m.width).Render(m.help.View(m.keys))
 
-	fullUI := lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		"\n",
-		body,
-	)
+	fullUI := lipgloss.JoinVertical(lipgloss.Left, header, "\n", body)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		AppPadding.Render(fullUI),
@@ -365,17 +384,10 @@ func (m *Model) View() string {
 	)
 }
 
-func (m *Model) KillRunner() {
-	if m.runner != nil {
-		_ = m.runner.Stop()
-		m.runner = nil
-	}
-}
-
 func (m *Model) appendLog(level LogType, message string) {
 	m.logs = append(m.logs, LogEntry{Type: level, Message: message, Timestamp: time.Now()})
-	if len(m.logs) > 200 {
-		m.logs = m.logs[len(m.logs)-200:]
+	if len(m.logs) > 100 {
+		m.logs = m.logs[len(m.logs)-100:]
 	}
 
 	var sb strings.Builder
@@ -394,34 +406,6 @@ func (m *Model) appendLog(level LogType, message string) {
 	}
 	m.vp.SetContent(sb.String())
 	m.vp.GotoBottom()
-}
-
-func firstWindowsExe(game discord.Game) string {
-	for _, exe := range game.Executables {
-		if exe.OS == discord.OSWindows && !exe.IsLauncher {
-			if out := normalizeExeDisplay(exe); out != "" {
-				return out
-			}
-		}
-	}
-	for _, exe := range game.Executables {
-		if exe.OS == discord.OSWindows {
-			if out := normalizeExeDisplay(exe); out != "" {
-				return out
-			}
-		}
-	}
-	return ""
-}
-
-func normalizeExeDisplay(exe discord.GameExecutable) string {
-	name := strings.TrimSpace(exe.Filename)
-	if name == "" {
-		name = strings.TrimSpace(exe.Name)
-	}
-	name = strings.ReplaceAll(name, "\\", "/")
-	name = strings.ReplaceAll(name, ">", "")
-	return path.Base(name)
 }
 
 func max(a, b int) int {

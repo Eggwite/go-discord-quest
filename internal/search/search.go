@@ -3,30 +3,67 @@ package search
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Eggwite/go-discord-quest/internal/discord"
 	"github.com/lithammer/fuzzysearch/fuzzy"
 )
 
-func Search(games []discord.Game, query string) []discord.Game {
-	if strings.TrimSpace(query) == "" {
-		return games
+// SearchableGame stores pre-processed strings for zero-allocation comparisons
+type SearchableGame struct {
+	Game         discord.Game
+	SearchTarget string
+}
+
+// PrepareSearchData converts raw Discord games into search-optimised structures
+// Performs lowercase transformations once during initialisation
+func PrepareSearchData(games []discord.Game) []SearchableGame {
+	out := make([]SearchableGame, len(games))
+	for i, g := range games {
+		var sb strings.Builder
+		sb.WriteString(strings.ToLower(g.Name))
+		for _, a := range g.Aliases {
+			sb.WriteString(" " + strings.ToLower(a))
+		}
+		out[i] = SearchableGame{
+			Game:         g,
+			SearchTarget: sb.String(),
+		}
+	}
+	return out
+}
+
+// Search filters the dataset and returns results along with execution duration
+// Utilises a fast-path substring check before applying fuzzy ranking
+func Search(data []SearchableGame, query string) ([]discord.Game, time.Duration) {
+	start := time.Now()
+
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		out := make([]discord.Game, len(data))
+		for i, d := range data {
+			out[i] = d.Game
+		}
+		return out, time.Since(start)
 	}
 
-	q := stripSymbols(strings.ToLower(query))
+	q := strings.ToLower(trimmed)
 	type scoredGame struct {
 		game  discord.Game
 		score float64
 	}
 
-	scored := make([]scoredGame, 0, len(games))
-	for _, g := range games {
-		nameScore := rankScore(q, stripSymbols(strings.ToLower(g.Name)))
-		aliasScore := bestAliasScore(q, g.Aliases)
-		exeScore := bestExeScore(q, g.Executables)
-		score := 0.7*nameScore + 0.2*aliasScore + 0.1*exeScore
-		if score > 0 {
-			scored = append(scored, scoredGame{game: g, score: score})
+	scored := make([]scoredGame, 0, 512)
+	for _, item := range data {
+		// Fast-path check to avoid fuzzy overhead on non-matching entries
+		if !strings.Contains(item.SearchTarget, q) {
+			continue
+		}
+
+		distance := fuzzy.RankMatchNormalized(q, item.SearchTarget)
+		if distance != -1 {
+			score := 1.0 / float64(distance+1)
+			scored = append(scored, scoredGame{game: item.Game, score: score})
 		}
 	}
 
@@ -37,44 +74,10 @@ func Search(games []discord.Game, query string) []discord.Game {
 		return scored[i].score > scored[j].score
 	})
 
-	out := make([]discord.Game, 0, len(scored))
-	for _, s := range scored {
-		out = append(out, s.game)
+	out := make([]discord.Game, len(scored))
+	for i, s := range scored {
+		out[i] = s.game
 	}
-	return out
-}
 
-func bestAliasScore(query string, aliases []string) float64 {
-	best := 0.0
-	for _, alias := range aliases {
-		s := rankScore(query, stripSymbols(strings.ToLower(alias)))
-		if s > best {
-			best = s
-		}
-	}
-	return best
-}
-
-func bestExeScore(query string, executables []discord.GameExecutable) float64 {
-	best := 0.0
-	for _, exe := range executables {
-		s := rankScore(query, stripSymbols(strings.ToLower(exe.Name)))
-		if s > best {
-			best = s
-		}
-	}
-	return best
-}
-
-func rankScore(query, candidate string) float64 {
-	distance := fuzzy.RankMatchNormalized(query, candidate)
-	if distance < 0 {
-		return 0
-	}
-	return 1.0 / float64(distance+1)
-}
-
-func stripSymbols(s string) string {
-	replacer := strings.NewReplacer("™", "", "©", "", "®", "")
-	return replacer.Replace(s)
+	return out, time.Since(start)
 }
