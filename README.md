@@ -1,6 +1,6 @@
 # go-discord-quest (dqc)
 
-A single-binary Windows CLI/TUI tool for automating Discord Quest completion without any heavy GUI frameworks or runtime dependencies.
+A single-binary Windows TUI tool for automating Discord Quest completion without any heavy GUI frameworks or runtime dependencies.
 
 > [!WARNING]  
 ># Disclaimer
@@ -16,15 +16,14 @@ A single-binary Windows CLI/TUI tool for automating Discord Quest completion wit
 - **Zero GUI Overhead**: Written entirely in Go with a terminal user interface (TUI) powered by Bubble Tea and Lipgloss.
 - **Smart Game Search**: Fuzzy search ranks games by title, aliases, and executable names for quick selection.
 - **Lightweight Stub Process**: Runs a minimal, size-optimized ~ 2.5MB Windows application, masquerading as the target game. This process sits quietly without interrupting your workflow.
-- **Deterministic Builds (CI)**: Release binaries are built in a clean CI environment with consistent flags to minimise environmental differences.
-
+  
 ## Installation & Usage (For Users)
 
 ### 1. Download the Latest Release
 Go to the [Releases](../../releases) tab on this repository and download the latest `dqc.exe`.
 
 ### 2. Run the Application
-Run `dqc.exe`. No installation wizard or elevated Administrator permissions are required!
+Run `dqc.exe`. No installation wizard or elevated Administrator permissions required.
 
 ```shell
 # From PowerShell or CMD
@@ -34,7 +33,7 @@ Run `dqc.exe`. No installation wizard or elevated Administrator permissions are 
 When you select a game, the tool will:
 1. Copy the internal lightweight game stub into `%USERPROFILE%\\Documents\\DiscordQuestGames\\<app_id>\\...`.
 2. Launch the stub as a new windowed application.
-3. Automatically kill the stub when the 15-minute quest duration is completed, when you close the window, or you press `q` / `Esc`.
+3. Automatically kill the stub when the 15-minute quest duration is completed. You may also close the window or press `q` / `Esc` to end it prematurely.
 
 ## Release Integrity
 
