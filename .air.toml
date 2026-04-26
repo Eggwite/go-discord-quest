@@ -1,0 +1,44 @@
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  args_bin = []
+  entrypoint = "tmp\\dqc.exe"
+  # Windows: build stub into tmp first, then copy to embedded asset path.
+  cmd = "New-Item -ItemType Directory -Force internal\\runner\\assets | Out-Null; go build -ldflags \"-H windowsgui -s -w\" -o tmp\\stub.exe ./stub; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Copy-Item -Force tmp\\stub.exe internal\\runner\\assets\\stub.exe; go build -o tmp\\dqc.exe ./cmd/dqc"
+  delay = 500
+  exclude_dir = ["assets", "tmp", "vendor", "dist", "games"]
+  exclude_file = []
+  exclude_regex = ["_test.go", "stub.exe"]
+  exclude_unchanged = false
+  follow_symlink = false
+  full_bin = ""
+  include_dir = ["cmd", "internal", "stub"]
+  include_ext = ["go", "json"]
+  include_file = []
+  kill_delay = "0s"
+  log = "build-errors.log"
+  poll = false
+  poll_interval = 0
+  rerun = false
+  rerun_delay = 500
+  stop_on_error = true
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  main_only = false
+  time = false
+
+[misc]
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = true
+  keep_scroll = true

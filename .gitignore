@@ -1,0 +1,30 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test test runs
+*.test
+
+# Output dirs
+/dist/
+/tmp/
+/games/
+
+# Built stubs
+/internal/runner/assets/stub.exe
+
+# Editor/OS specific
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Go specific 
+vendor/
+go.work
+go.work.sum
+

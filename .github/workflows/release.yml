@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    permissions:
+      contents: write
+
+    env:
+      CGO_ENABLED: 0
+      GOOS: windows
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Set version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          echo "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Prepare output directory
+        shell: pwsh
+        run: mkdir dist -Force
+
+      - name: Build stub (required for embed)
+        shell: pwsh
+        run: |
+          $env:GOARCH="amd64"
+
+          go build -trimpath `
+            -ldflags "-H windowsgui -s -w" `
+            -o internal/runner/assets/stub.exe `
+            ./stub
+
+      - name: Build application
+        shell: pwsh
+        run: |
+          $env:GOARCH="amd64"
+
+          go build -trimpath `
+            -ldflags "-s -w -X main.version=$env:VERSION" `
+            -o dist/dqc-amd64.exe `
+            ./cmd/dqc
+
+      - name: Generate SHA256
+        shell: pwsh
+        run: |
+          certutil -hashfile dist/dqc-amd64.exe SHA256 > dist/dqc-amd64.sha256
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/dqc-amd64.exe
+            dist/dqc-amd64.sha256
+          generate_release_notes: true

@@ -1,0 +1,13 @@
+[
+    {
+        "id": "sample-game",
+        "name": "Sample Game",
+        "executables": [
+            {
+                "is_launcher": false,
+                "name": "SampleGame.exe",
+                "os": "win32"
+            }
+        ]
+    }
+]
