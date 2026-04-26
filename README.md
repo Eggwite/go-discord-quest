@@ -1,52 +1,59 @@
-# go-discord-quest (dqc)
+<p>
+  <h1 align="center">go-discord-quest (dqc)</h1>
+</p>
 
-A single-binary Windows TUI tool for automating Discord Quest completion without any heavy GUI frameworks or runtime dependencies.
+https://github.com/user-attachments/assets/4eb8f725-6ff9-4b7f-b502-742d4a22f294
+
+<p>
+  <h4 align="center"> 📦 A single-file Windows TUI tool for automating Discord Quest completion.
+</h1>
+</p>
+
+## 2-Step Quick Start
+
+1. Go to the [Releases](../../releases) tab on this repository and download the latest `dqc-amd64.exe`.
+
+2. Run `dqc-amd64.exe`. *No installation wizard or elevated Administrator permissions required.*
+
+
+>### What it does:
+> <img width="720" height="640" alt="image" align="center" src="https://github.com/user-attachments/assets/16d465d5-b2e9-4c65-9983-8920c59d175e" />
+
+
+
+---
 
 > [!WARNING]  
 ># Disclaimer
 >
 >This project is provided for educational and research purposes only. It is not intended to be used in violation of any platform’s terms of service.
 >
->Use of this software may conflict with the terms set by **Discord**. You are solely responsible for ensuring that your use complies with the applicable terms, including the **Discord Terms of Service**:
->https://discord.com/terms
+>Use of this software may conflict with the terms set by **Discord**. You are solely responsible for ensuring that your use complies with the applicable terms, including the [**Discord Terms of Service**](https://discord.com/terms)
 >
->I do not condone or encourage misuse of this tool or any activity that violates service agreements.
+>I, the author, do not condone or encourage misuse of this tool or any activity that violates service agreements.
 
-## Features
-- **Zero GUI Overhead**: Written entirely in Go with a terminal user interface (TUI) powered by Bubble Tea and Lipgloss.
-- **Smart Game Search**: Fuzzy search ranks games by title, aliases, and executable names for quick selection.
-- **Lightweight Stub Process**: Runs a minimal, size-optimized ~ 2.5MB Windows application, masquerading as the target game. This process sits quietly without interrupting your workflow.
-  
-## Installation & Usage (For Users)
+## Privacy
 
-### 1. Download the Latest Release
-Go to the [Releases](../../releases) tab on this repository and download the latest `dqc.exe`.
+This tool does not collect, store, or transmit personal data.
 
-### 2. Run the Application
-Run `dqc.exe`. No installation wizard or elevated Administrator permissions required.
+- No telemetry
+- No analytics
+- No external tracking services
 
-```shell
-# From PowerShell or CMD
-.\dqc.exe
-```
+All operations are performed locally on your machine, **except for requests made directly to official Discord endpoints required for functionality.**
 
-When you select a game, the tool will:
-1. Copy the internal lightweight game stub into `%USERPROFILE%\\Documents\\DiscordQuestGames\\<app_id>\\...`.
-2. Launch the stub as a new windowed application.
-3. Automatically kill the stub when the 15-minute quest duration is completed. You may also close the window or press `q` / `Esc` to end it prematurely.
-
-## Release Integrity
+### Release Integrity
 
 Each release includes a SHA256 checksum (`.sha256`) alongside the binary.
 
-You can verify the integrity of the downloaded executable:
+You can optionally verify the integrity of the downloaded executable:
 
 ```powershell
-certutil -hashfile .\dqc.exe SHA256
+certutil -hashfile .\dqc-amd64.exe SHA256
 ```
 ---
 
-## Developer Setup (DEVX)
+## Development (DEVX)
 
 ### Prerequisites
 - Go 1.26+ (current stable series)
@@ -55,12 +62,8 @@ certutil -hashfile .\dqc.exe SHA256
 
 ### Build from Source
 
-This project uses standard Go tooling and does not require `make` or any Unix-like environment.
-
-#### PowerShell (Recommended)
-
 ```powershell 
-# build.ps1
+# build.ps1 (you can run this included script)
 
 $env:CGO_ENABLED = "0"
 $env:GOOS = "windows"
@@ -77,22 +80,10 @@ go build `
 -o dist/dqc.exe `
 	./cmd/dqc
 ```
-`-trimpath` removes local filesystem paths from the binary, improving build reproducibility.
-The final artifact will be located at dist/dqc.exe.
 
-### Live Reload / Debugging (Using Air)
-To improve the development experience with hot-reloading:
+Output: `dist/dqc.exe`
 
-1. Install Air:
-   ```shell
-   go install github.com/air-verse/air@latest
-   ```
-2. Start Air:
-   ```shell
-   air
-   ```
-   Air will automatically rebuild the stub and restart the TUI whenever you save a `.go` file.
-## Versioning & Releases
+### Versioning & Releases
 
 Releases are tagged using the format:
 
@@ -106,28 +97,7 @@ Each tag triggers an automated GitHub Actions workflow which:
 - Generates a SHA256 checksum
 - Publishes both as a GitHub Release
 
-Example:
-- `v1.2.0` → produces `dqc.exe` and `dqc-amd64.sha256`
-
 Only tagged commits are released. The `main` branch may contain unreleased changes.
 
-## Architecture
-
-- **`internal/tui/`**: Contains the Bubble Tea state machine, views (progress, search), and styling.
-- **`internal/runner/`**: Manages deploying the embedded executable into a local folder and tracking the running process.
-- **`internal/discord/`**: Defines the target typings and Discord API for mapping games correctly.
-- **`internal/search/`**: Provides weighted fuzzy sorting across multiple game metadata fields to prioritise exact game matches.
-- **`stub/`**: A pure `x/sys/windows` Win32 implementation handling standard window creation.
-
-## Logs & Debugging
+### Logs & Debugging
 The TUI maintains an in-memory ring-buffer of log entries (`LogInfo`, `LogWarning`, `LogError`). These logs can be dumped or extended using the internal `tui.Model` methods.
-
-## Privacy
-
-This tool does not collect, store, or transmit personal data.
-
-- No telemetry
-- No analytics
-- No external tracking services
-
-All operations are performed locally on your machine, **except for requests made directly to official Discord endpoints required for functionality.**
