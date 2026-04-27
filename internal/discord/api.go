@@ -2,7 +2,6 @@ package discord
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,12 +10,7 @@ import (
 	"time"
 )
 
-const (
-	discordURL = "https://discord.com/api/applications/detectable"
-)
-
-//go:embed assets/gamelist.json
-var bundledList []byte
+const discordURL = "https://discord.com/api/applications/detectable"
 
 func FetchDetectable(ctx context.Context) ([]Game, error) {
 	games, _, err := FetchDetectableWithTrace(ctx)
@@ -24,22 +18,16 @@ func FetchDetectable(ctx context.Context) ([]Game, error) {
 }
 
 func FetchDetectableWithTrace(ctx context.Context) ([]Game, []string, error) {
-	trace := make([]string, 0, 4)
+	trace := make([]string, 0, 2)
 
 	trace = append(trace, "* Fetching from Discord API...")
-	if games, err := fetchURL(ctx, discordURL); err == nil {
-		trace = append(trace, "  + Done")
-		return filterWindows(games), trace, nil
-	} else {
-		trace = append(trace, fmt.Sprintf("  - Failed (%v), using bundled list", err))
-	}
-
-	trace = append(trace, "* Using bundled game list")
-	games, err := parseBundled()
+	games, err := fetchURL(ctx, discordURL)
 	if err != nil {
-		return nil, trace, err
+		trace = append(trace, fmt.Sprintf("  - Failed: %v", err))
+		return nil, trace, errors.New("could not fetch game list from Discord API")
 	}
 
+	trace = append(trace, "  + Done")
 	return filterWindows(games), trace, nil
 }
 
@@ -49,8 +37,7 @@ func fetchURL(ctx context.Context, url string) ([]Game, error) {
 		return nil, err
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -64,31 +51,13 @@ func fetchURL(ctx context.Context, url string) ([]Game, error) {
 	if err != nil {
 		return nil, err
 	}
-	games, err := parseGames(body)
-	if err != nil {
+
+	var games []Game
+	if err := json.Unmarshal(body, &games); err != nil {
 		return nil, err
 	}
 	if len(games) == 0 {
 		return nil, errors.New("empty game list")
-	}
-	return games, nil
-}
-
-func parseBundled() ([]Game, error) {
-	games, err := parseGames(bundledList)
-	if err != nil {
-		return nil, err
-	}
-	if len(games) == 0 {
-		return nil, errors.New("bundled list is empty")
-	}
-	return games, nil
-}
-
-func parseGames(raw []byte) ([]Game, error) {
-	var games []Game
-	if err := json.Unmarshal(raw, &games); err != nil {
-		return nil, err
 	}
 	return games, nil
 }
