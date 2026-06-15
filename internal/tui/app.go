@@ -20,12 +20,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const QuestDuration = 15 * time.Minute
-
 type AppState int
 
 const (
 	StateLoading AppState = iota
+	StateTimer
 	StateSearch
 	StateRunning
 	StateDone
@@ -87,6 +86,8 @@ type Model struct {
 	started time.Time
 	elapsed time.Duration
 
+	timerDuration time.Duration
+
 	width  int
 	height int
 
@@ -108,16 +109,17 @@ func New() *Model {
 	vp.Style = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(Muted)
 
 	return &Model{
-		state:        StateLoading,
-		spinner:      sp,
-		input:        input,
-		list:         lst,
-		bar:          bar,
-		help:         hp,
-		vp:           vp,
-		keys:         DefaultKeyMap(),
-		loadingTrace: []string{"* Fetching from GitHub mirror...", "* Fetching from Discord API...", "* Using bundled game list"},
-		logs:         make([]LogEntry, 0, 32),
+		state:         StateLoading,
+		spinner:       sp,
+		input:         input,
+		list:          lst,
+		bar:           bar,
+		help:          hp,
+		vp:            vp,
+		keys:          DefaultKeyMap(),
+		timerDuration: 15*time.Minute + 30*time.Second,
+		loadingTrace:  []string{"* Fetching from GitHub mirror...", "* Fetching from Discord API...", "* Using bundled game list"},
+		logs:          make([]LogEntry, 0, 32),
 	}
 }
 
@@ -218,7 +220,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.elapsed = time.Since(m.started)
-		if m.elapsed >= QuestDuration {
+		if m.elapsed >= m.timerDuration {
 			_ = m.runner.Stop()
 			m.runner = nil
 			m.state = StateDone
@@ -250,15 +252,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch m.state {
+		case StateTimer:
+			switch msg.String() {
+			case "up":
+				m.timerDuration += 30 * time.Second
+				if m.timerDuration > 60*time.Minute {
+					m.timerDuration = 60 * time.Minute
+				}
+			case "down":
+				m.timerDuration -= 30 * time.Second
+				if m.timerDuration < 5*time.Minute {
+					m.timerDuration = 5 * time.Minute
+				}
+			case "enter":
+				m.state = StateRunning
+				m.elapsed = 0
+				return m, startRunnerCmd(m.selected)
+			case "esc":
+				m.state = StateSearch
+			}
 		case StateSearch:
 			switch msg.String() {
 			case "enter":
 				game, ok := views.SelectedGame(m.list)
 				if ok {
 					m.selected = game
-					m.state = StateRunning
-					m.elapsed = 0
-					return m, startRunnerCmd(game)
+					m.state = StateTimer
 				}
 			}
 
@@ -340,6 +359,9 @@ func (m *Model) View() string {
 	case StateLoading:
 		body = m.spinner.View() + " Initialising..."
 
+	case StateTimer:
+		body = views.RenderTimerCard(m.selected.Name, m.timerDuration)
+
 	case StateSearch:
 		// Triggers breakdown of search latency in seconds, milliseconds, microseconds, and nanoseconds
 		latency := formatLatency(m.searchTime)
@@ -372,13 +394,31 @@ func (m *Model) View() string {
 		if m.runner != nil {
 			exePath = m.runner.ExePath
 		}
-		body = views.RenderProgressCard(m.selected.Name, exePath, m.elapsed, QuestDuration, m.bar)
+		body = views.RenderProgressCard(m.selected.Name, exePath, m.elapsed, m.timerDuration, m.bar)
 
 	case StateDone:
 		body = lipgloss.NewStyle().Foreground(Success).Bold(true).Render("Quest completed! Press Q to return.")
 	}
 
 	footer := StatusBarStyle.Width(m.width).Render(m.help.View(m.keys))
+
+	// In timer state, show timer-specific help instead
+	if m.state == StateTimer {
+		upArrow := lipgloss.NewStyle().Foreground(Accent).Bold(true).Render("↑")
+		downArrow := lipgloss.NewStyle().Foreground(Accent).Bold(true).Render("↓")
+		enterKey := lipgloss.NewStyle().Foreground(Accent).Bold(true).Render("enter")
+		escKey := lipgloss.NewStyle().Foreground(Accent).Bold(true).Render("esc")
+		ctrlC := lipgloss.NewStyle().Foreground(Accent).Bold(true).Render("ctrl+c")
+		muted := lipgloss.NewStyle().Foreground(Muted).Render
+
+		helpStr := fmt.Sprintf(" %s %s  %s  •  %s  %s  •  %s  %s  •  %s  %s",
+			upArrow, downArrow, muted("adjust timer"),
+			enterKey, muted("confirm & spoof"),
+			escKey, muted("back to search"),
+			ctrlC, muted("quit"),
+		)
+		footer = StatusBarStyle.Width(m.width).Render(helpStr)
+	}
 
 	fullUI := lipgloss.JoinVertical(lipgloss.Left, header, "\n", body)
 
